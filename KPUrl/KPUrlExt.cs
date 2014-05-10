@@ -42,7 +42,7 @@ namespace KPUrl
 			key = key.CreateSubKey(@"shell\open");
 			key.SetValue("", "&Open");
 
-			key.CreateSubKey(@"command").SetValue("", exe + "-event \"-KPUrl:%1\"");
+			key.CreateSubKey(@"command").SetValue("", exe + " -event \"-KPUrl:%1\"");
 
 			m_host.MainWindow.EventMsgReceived += OnEventMsgReceived;
 

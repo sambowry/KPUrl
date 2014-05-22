@@ -239,44 +239,49 @@ namespace KPUrl
 
 		private string MatchEntry(PwDatabase pd, PwEntry pe, string scheme, string matchTitle, out int distance)
 		{
-			distance = 128;
 			string peTitleRaw = pe.Strings.ReadSafeEx(PwDefs.TitleField);
 			string peTitleStr = SprEngine.Compile(peTitleRaw, new SprContext(pe, pd, SprCompileFlags.All, false, false));
 
-			if (String.Equals(peTitleStr, matchTitle, StringComparison.OrdinalIgnoreCase))
+			if (peTitleStr.IndexOf(matchTitle, StringComparison.OrdinalIgnoreCase) >= 0)
 			{
+				distance = 0;
+				if ( ! String.Equals(peTitleStr, matchTitle, StringComparison.OrdinalIgnoreCase))
+				{
+					distance++;
+				}
 				if (pe.Strings.ReadSafeEx(scheme) != "")
 				{
-					distance = 0;
 					return scheme;
 				}
 				if (pe.Strings.ReadSafeEx(PwDefs.UrlField+"-"+scheme) != "")
 				{
-					distance = 0;
 					return PwDefs.UrlField+"-"+scheme;
 				}
 				string URL = pe.Strings.ReadSafeEx(PwDefs.UrlField);
 				if (URL != "")
 				{
-					distance = 2;
-					string peScheme = URL.Substring(0, URL.IndexOf(":") );
-					if ( String.Equals(peScheme, scheme, StringComparison.OrdinalIgnoreCase) )
+					string peScheme = URL.Substring(0, URL.IndexOf(":"));
+					if (!String.Equals(peScheme, scheme, StringComparison.OrdinalIgnoreCase))
 					{
-						distance = 1;
+						distance++;
+						if (peScheme.IndexOf(scheme, StringComparison.OrdinalIgnoreCase) < 0)
+						{
+							distance++;
+						}
 					}
 					return PwDefs.UrlField;
 				}
 			}
+			distance = int.MaxValue;
 			return null;
 		}
 
 		private bool FindHostEntry(string scheme, string hostName, out PwEntry entryFound, out string fieldNameFound)
 		{
-			entryFound = null;
-			fieldNameFound = null;
 			PwDatabase lastPwDatabase = null;
 			PwEntry lastPwEntry = null;
 			string fieldName = null;
+			int lastDistance = int.MaxValue;
 
 			EntryHandler eh = delegate(PwEntry pe)
 			{
@@ -284,10 +289,16 @@ namespace KPUrl
 				string fn = MatchEntry(lastPwDatabase, pe, scheme, hostName, out distance);
 				if (fn != null)
 				{
-					lastPwEntry = pe;
-					fieldName = fn;
+					if (distance < lastDistance)
+					{
+						lastPwEntry = pe;
+						fieldName = fn;
+						lastDistance = distance;
+					}
+					return distance == 0;
 				}
-				return fn == null;
+				distance = int.MaxValue;
+				return true;
 			};
 
 			List<PwDocument> docs = m_host.MainWindow.DocumentManager.Documents;
@@ -295,13 +306,15 @@ namespace KPUrl
 			{
 				lastPwDatabase = d.Database;
 				d.Database.RootGroup.TraverseTree(TraversalMethod.PreOrder, null, eh);
-				if (lastPwEntry != null && fieldName != null)
+				if (lastPwEntry != null && fieldName != null && lastDistance < int.MaxValue)
 				{
 					entryFound = lastPwEntry;
 					fieldNameFound = fieldName;
 					return true;
 				}
 			}
+			entryFound = null;
+			fieldNameFound = null;
 			return false;
 		}
 	}

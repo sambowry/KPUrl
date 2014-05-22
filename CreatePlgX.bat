@@ -12,7 +12,7 @@ echo Copying files
 xcopy KPUrl PlgX /s /e /exclude:PlgXExclude.txt
 
 echo Compiling PlgX
-KPUrl\bin\Release\KeePass.exe /plgx-create "%~dp0KPUrl"
+..\KeePass.exe --plgx-create "%~dp0KPUrl"  --plgx-prereq-kp:2.26 ----plgx-prereq-os:Windows
 
 echo Cleaning up
 rmdir /s /q PlgX

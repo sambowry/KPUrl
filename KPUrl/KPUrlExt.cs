@@ -59,17 +59,11 @@ namespace KPUrl
 			m_host = host;
 			m_debug = (m_host.CommandLineArgs[AppDefs.CommandLineOptions.Debug] != null);
 
-			AppConfigEx config = KeePass.Program.Config;
-			foreach (AceUrlSchemeOverride url in config.Integration.UrlSchemeOverrides.BuiltInOverrides)
-			{
-				if (url.Enabled) RegisterProtocol(url.Scheme);
-			}
-			foreach (AceUrlSchemeOverride url in config.Integration.UrlSchemeOverrides.CustomOverrides)
-			{
-				if (url.Enabled) RegisterProtocol(url.Scheme);
-			}
+			RegisterAll();
 
+			GlobalWindowManager.WindowAdded += WindowAddedHandler;
 			IpcUtilEx.IpcEvent += OnIpcEvent;
+
 			return true;
 		}
 
@@ -99,6 +93,22 @@ namespace KPUrl
 							MyName + ", OnEventMsgReceived()", MessageBoxButtons.OK, MessageBoxIcon.Error);
 					}
 				}
+			}
+		}
+
+		private void WindowAddedHandler(object aSender, GwmWindowEventArgs aEventArgs)
+		{
+			var optionsForm = aEventArgs.Form as OptionsForm;
+			if (optionsForm != null)
+			{
+				optionsForm.FormClosed += delegate(object sender, FormClosedEventArgs args)
+				{
+					if (optionsForm.DialogResult == DialogResult.OK)
+					{
+						DeRegisterAll();
+						RegisterAll();
+					}
+				};
 			}
 		}
 
@@ -146,6 +156,8 @@ namespace KPUrl
 
 		public override void Terminate()
 		{
+			GlobalWindowManager.WindowAdded -= WindowAddedHandler;
+			IpcUtilEx.IpcEvent -= OnIpcEvent;
 			DeRegisterAll();
 		}
 
@@ -158,8 +170,8 @@ namespace KPUrl
 				if ( classes.OpenSubKey(protocol) != null )
 				{
 					m_renamed.Add(protocol);
-					if ( classes.OpenSubKey("KPUrl-"+protocol) == null )
-						ru.RenameSubKey(classes, protocol, "KPUrl-"+protocol);
+					if ( classes.OpenSubKey(MyName+"-"+protocol) == null )
+						ru.RenameSubKey(classes, protocol, MyName+"-"+protocol);
 				}
 
 				m_created.Add(protocol);
@@ -174,23 +186,54 @@ namespace KPUrl
 				key.CreateSubKey(@"command").SetValue( "",
 					exe + " -" + AppDefs.CommandLineOptions.IpcEvent + ":" + MyName + " \"%1\"" );
 			}
-			catch { }
+			catch(Exception e)
+			{
+				MessageBox.Show(e.Message, MyName + ", RegisterProtocol(" + protocol + ")",
+					MessageBoxButtons.OK, MessageBoxIcon.Error);
+			}
 			classes.Close();
+		}
+
+		private void RegisterAll()
+		{
+			AppConfigEx config = KeePass.Program.Config;
+			foreach (AceUrlSchemeOverride url in config.Integration.UrlSchemeOverrides.BuiltInOverrides)
+			{
+				if (url.Enabled) RegisterProtocol(url.Scheme);
+			}
+			foreach (AceUrlSchemeOverride url in config.Integration.UrlSchemeOverrides.CustomOverrides)
+			{
+				if (url.Enabled) RegisterProtocol(url.Scheme);
+			}
 		}
 
 		private void DeRegisterAll()
 		{
 			RegistryKey classes = Registry.CurrentUser.OpenSubKey(@"Software\Classes", true);
+
 			foreach (string protocol in m_created)
 			{
 				try { classes.DeleteSubKeyTree(protocol); }
-				catch { }
+				catch(Exception e)
+				{
+					MessageBox.Show(e.Message, MyName + ", DeleteSubKeyTree(" + protocol + ")",
+						MessageBoxButtons.OK, MessageBoxIcon.Error);
+				}
 			}
+			m_created = new List<string>();
+
 			foreach (string protocol in m_renamed)
 			{
 				try { ru.RenameSubKey(classes, MyName+"-"+protocol, protocol); }
-				catch { }
+				catch (Exception e)
+				{
+					MessageBox.Show(e.Message, MyName + ", RenameSubKey( "+ MyName+"-"+protocol + ", " + protocol + ")",
+						MessageBoxButtons.OK, MessageBoxIcon.Error);
+				}
+
 			}
+			m_renamed = new List<string>();
+
 			classes.Close();
 		}
 

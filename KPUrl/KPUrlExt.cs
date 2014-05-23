@@ -237,7 +237,7 @@ namespace KPUrl
 			classes.Close();
 		}
 
-		private string MatchEntry(PwDatabase pd, PwEntry pe, string scheme, string matchTitle, out int distance)
+		private string MatchEntry( PwDatabase pd, PwEntry pe, string scheme, string matchTitle, out int distance)
 		{
 			string peTitleRaw = pe.Strings.ReadSafeEx(PwDefs.TitleField);
 			string peTitleStr = SprEngine.Compile(peTitleRaw, new SprContext(pe, pd, SprCompileFlags.All, false, false));
@@ -283,19 +283,23 @@ namespace KPUrl
 			string fieldName = null;
 			int lastDistance = int.MaxValue;
 
+			PwGroup pg = new PwGroup(true, true, "search for '"+scheme+":"+hostName+"'", PwIcon.EMailSearch);
+			pg.IsVirtual = true;
+
 			EntryHandler eh = delegate(PwEntry pe)
 			{
 				int distance;
 				string fn = MatchEntry(lastPwDatabase, pe, scheme, hostName, out distance);
 				if (fn != null)
 				{
+					pg.AddEntry(pe, false);
 					if (distance < lastDistance)
 					{
 						lastPwEntry = pe;
 						fieldName = fn;
 						lastDistance = distance;
 					}
-					return distance == 0;
+					return distance != 0;
 				}
 				distance = int.MaxValue;
 				return true;
@@ -306,12 +310,31 @@ namespace KPUrl
 			{
 				lastPwDatabase = d.Database;
 				d.Database.RootGroup.TraverseTree(TraversalMethod.PreOrder, null, eh);
-				if (lastPwEntry != null && fieldName != null && lastDistance < int.MaxValue)
+				if (lastPwEntry != null && fieldName != null && lastDistance == 0)
 				{
 					entryFound = lastPwEntry;
 					fieldNameFound = fieldName;
 					return true;
 				}
+			}
+
+			uint uNumGroups;
+			uint uNumEntries;
+			pg.GetCounts(true, out uNumGroups, out uNumEntries);
+			if (uNumEntries > 0)
+			{
+				if (uNumEntries == 1)
+				{
+					int distance;
+					lastPwEntry = pg.Entries.GetAt(0);
+					entryFound = lastPwEntry;
+					DocumentManagerEx dm = KeePass.Program.MainForm.DocumentManager;
+					fieldNameFound = MatchEntry(dm.FindContainerOf(lastPwEntry), lastPwEntry, scheme, hostName, out distance);
+					return true;
+				}
+				KeePass.Program.MainForm.UpdateUI(false, null, false, null, true, pg, false);
+				KeePass.Program.MainForm.RefreshEntriesList();
+				KeePass.Program.MainForm.EnsureVisibleForegroundWindow(true, true);
 			}
 			entryFound = null;
 			fieldNameFound = null;

@@ -23,7 +23,7 @@
 using System;
 using System.Windows.Forms;
 using System.Collections.Generic;
-//using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
 using KeePass.App;
@@ -59,24 +59,56 @@ namespace KPUrl
 			m_host = host;
 			m_debug = (m_host.CommandLineArgs[AppDefs.CommandLineOptions.Debug] != null);
 
-			RegisterAll();
-
 			GlobalWindowManager.WindowAdded += WindowAddedHandler;
 			IpcUtilEx.IpcEvent += OnIpcEvent;
+			SprEngine.FilterCompilePre += OnFilterCompilePre;
 
+			RegisterAll();
 			return true;
 		}
 
-		private void OnIpcEvent(object sender, IpcEventArgs a)
+		private void OnFilterCompilePre(object sender, SprEventArgs a)
+		{
+			SprContext ctx = a.Context;
+			SprCompileFlags saved_flags = ctx.Flags;
+			if ((saved_flags & SprCompileFlags.ExtNonActive) != SprCompileFlags.None)
+			{
+
+				string url = a.Text;
+				if (url.StartsWith("{!C:" + MyName + "}"))
+				{
+					string scheme = url.Substring(0, url.IndexOf(":"));
+					string hostname = UrlUtil.GetHost(url);
+					PwEntry pe;
+					string fn, compiled = null;
+					if (FindHostEntry(scheme, hostname, out pe, out fn))
+					{
+						ctx.Flags &= ~SprCompileFlags.ExtActive;
+						ctx.Flags &= ~SprCompileFlags.ExtNonActive;
+						GetOverrideForUrl(pe.Strings.ReadSafe(fn), pe, out compiled);
+						ctx.Flags = saved_flags;
+					}
+					if (!String.IsNullOrEmpty(compiled))
+					{
+						a.Text = compiled;
+					}
+					else
+						MessageBox.Show("No suitable URL entry found for '" + a.Text + "'",
+							MyName + ", OnEventMsgReceived()", MessageBoxButtons.OK, MessageBoxIcon.Error);
+				}
+			}
+		}
+
+		private void OnIpcEvent_old(object sender, IpcEventArgs a)
 		{
 			if (m_debug && ShowIpcEventArgs(a) != DialogResult.OK) return;
 
-			if ( String.Equals(a.Name, MyName, StringComparison.OrdinalIgnoreCase) )
+			if (String.Equals(a.Name, MyName, StringComparison.OrdinalIgnoreCase))
 			{
 				string URL = a.Args.FileName;
-				string scheme = URL.Substring(0, URL.IndexOf(":") );
+				string scheme = URL.Substring(0, URL.IndexOf(":"));
 				string hostname = UrlUtil.GetHost(URL);
-	
+
 				if (hostname != "")
 				{
 					PwEntry entry;
@@ -90,9 +122,107 @@ namespace KPUrl
 					else
 					{
 						MessageBox.Show("No suitable URL entry found for '" + a.Args.FileName + "'",
-							MyName + ", OnEventMsgReceived()", MessageBoxButtons.OK, MessageBoxIcon.Error);
+						MyName + ", OnEventMsgReceived()", MessageBoxButtons.OK, MessageBoxIcon.Error);
 					}
 				}
+			}
+		}
+
+		private void OnIpcEvent(object sender, IpcEventArgs a)
+		{
+			if (m_debug && ShowIpcEventArgs(a) != DialogResult.OK) return;
+			if (!String.Equals(a.Name, MyName, StringComparison.OrdinalIgnoreCase)) return;
+			string url = a.Args.FileName;
+			string scheme = url.Substring(0, url.IndexOf(":"));
+			string hostname = UrlUtil.GetHost(url);
+			PwEntry pe;
+			string fn, compiled = null;
+			if (FindHostEntry(scheme, hostname, out pe, out fn))
+				GetOverrideForUrl(pe.Strings.ReadSafe(fn), pe, out compiled);
+			if (!String.IsNullOrEmpty(compiled))
+				KeePass.Util.WinUtil.OpenUrl(compiled, pe, false);
+			else
+				MessageBox.Show("No suitable URL entry found for '" + a.Args.FileName + "'",
+					MyName + ", OnEventMsgReceived()", MessageBoxButtons.OK, MessageBoxIcon.Error);
+		}
+
+		string GetOverrideForUrl(string url, PwEntry pe, out string compiled)
+		{
+			string ovr = null, text = "";
+			compiled = null;
+			SprContext ctx = new SprContext(pe, KeePass.Program.MainForm.DocumentManager.FindContainerOf(pe),
+										SprCompileFlags.All, false, false);
+			ctx.ForcePlainTextPasswords = true;
+			ctx.BaseIsEncoded = false; // ???
+			ctx.Base = url;
+			text += "Base: " + url + "\r\n";
+			if (pe.OverrideUrl.Length > 0)
+			{
+				ovr = pe.OverrideUrl;
+				compiled = SprEngine.Compile(ovr, ctx);
+			}
+			else if (KeePass.Program.Config.Integration.UrlOverride.Length > 0)
+			{
+				ovr = KeePass.Program.Config.Integration.UrlOverride;
+				compiled = SprEngine.Compile(ovr, ctx);
+			}
+			else
+			{
+				Regex rx = new Regex("({(?>[^{}]+|(?'paren'{)|(?'-paren'}))*(?(paren)(?!))})");
+				var o = KeePass.Program.Config.Integration.UrlSchemeOverrides;
+				foreach (var l in new List<List<AceUrlSchemeOverride>> { o.BuiltInOverrides, o.CustomOverrides })
+					foreach (var u in l)
+						if (u.Enabled && url.StartsWith(u.Scheme + ":", StrUtil.CaseIgnoreCmp))
+						{
+							text += "AceUrlSchemeOverride: " + u.Scheme + ": " + u.UrlOverride + "\r\n";
+							int countEmpty = 0;
+							compiled = "";
+							bool plh = false;
+							string[] seg = rx.Split(u.UrlOverride);
+							foreach (string s in seg)
+							{
+								text += "seg: " + s + "\r\n";
+								string res1=s, res2;
+								do
+								{
+									res2 = res1;
+									res1 = SprEngine.Compile(res2, ctx);
+									text += "res: " + res1 + "\r\n";
+								} while (!res1.Equals(res2));
+								if (plh && res1.StartsWith("{"))
+								{
+									text += "empty: " + res1 + "\r\n";
+									res1 = "";
+								}
+								if (plh && String.IsNullOrEmpty(res1) && !s.StartsWith("{C:", StringComparison.OrdinalIgnoreCase)) countEmpty++;
+								compiled += res1;
+								plh = !plh;
+							}
+							text += "compiled: " + compiled + "\r\n";
+							text += "countEmpty: " + countEmpty + "\r\n";
+							text += "\r\n";
+							if (countEmpty == 0) goto ret;
+						}
+			}
+		ret:
+			Form d = new TraceBox(text);
+			d.ShowDialog();
+			return ovr;
+		}
+
+		private class TraceBox : Form
+		{
+			public TraceBox(string str)
+			{
+				Text = "trace";
+				TextBox t = new TextBox();
+				t.Text = str;
+				t.Dock = DockStyle.Fill;
+				t.Multiline = true;
+				t.ScrollBars = ScrollBars.Both;
+				t.WordWrap = false;
+				t.SelectionStart = 0;
+				Controls.Add(t);
 			}
 		}
 
@@ -150,43 +280,54 @@ namespace KPUrl
 				s += e.Message + "\r\n";
 			}
 			DialogResult res = MessageBox.Show(s, MyName + ", ShowIpcEventArgs()",
-				MessageBoxButtons.OKCancel , MessageBoxIcon.None);
+				MessageBoxButtons.OKCancel, MessageBoxIcon.None);
 			return res;
 		}
 
 		public override void Terminate()
 		{
+			DeRegisterAll();
+			SprEngine.FilterCompilePre -= OnFilterCompilePre;
 			GlobalWindowManager.WindowAdded -= WindowAddedHandler;
 			IpcUtilEx.IpcEvent -= OnIpcEvent;
-			DeRegisterAll();
 		}
 
 		private void RegisterProtocol(string protocol)
 		{
-			string exe = '"' + Application.ExecutablePath + '"';
+			if (m_created.Contains(protocol)) return;
+			//string exe = '"' + Application.ExecutablePath + '"';
+			string exe = '"' + WinUtil.GetExecutable() + '"';
 			RegistryKey classes = Registry.CurrentUser.OpenSubKey(@"Software\Classes", true);
 			try
 			{
-				if ( classes.OpenSubKey(protocol) != null )
+				RegistryKey key = classes.OpenSubKey(protocol, true);
+				if (key != null)
 				{
-					m_renamed.Add(protocol);
-					if ( classes.OpenSubKey(MyName+"-"+protocol) == null )
-						ru.RenameSubKey(classes, protocol, MyName+"-"+protocol);
+					string def = key.GetValue("", "").ToString();
+					if (!def.StartsWith("URL:" + MyName, StringComparison.OrdinalIgnoreCase))
+					{
+						m_renamed.Add(protocol);
+						if (classes.OpenSubKey(MyName + "-" + protocol) == null)
+							ru.RenameSubKey(classes, protocol, MyName + "-" + protocol);
+					}
 				}
 
 				m_created.Add(protocol);
-				RegistryKey key = classes.CreateSubKey(protocol);
-				key.SetValue("", "URL:" + protocol + " protocol");
+				key = classes.CreateSubKey(protocol);
+				key.SetValue("", "URL:" + MyName + " " + protocol + " protocol");
 				key.SetValue("URL Protocol", "");
 				key.SetValue("UseOriginalUrlEncoding", 1);
 
-				key = key.CreateSubKey(@"shell\open");
-				key.SetValue("", "&Open");
+				key = key.CreateSubKey(@"shell");
+				key.SetValue("", "open");
 
-				key.CreateSubKey(@"command").SetValue( "",
-					exe + " -" + AppDefs.CommandLineOptions.IpcEvent + ":" + MyName + " \"%1\"" );
+				key = key.CreateSubKey(@"open");
+				key.SetValue("", "");
+
+				key.CreateSubKey(@"command").SetValue("",
+					exe + " -" + AppDefs.CommandLineOptions.IpcEvent + ":" + MyName + " \"%1\"");
 			}
-			catch(Exception e)
+			catch (Exception e)
 			{
 				MessageBox.Show(e.Message, MyName + ", RegisterProtocol(" + protocol + ")",
 					MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -196,14 +337,16 @@ namespace KPUrl
 
 		private void RegisterAll()
 		{
-			AppConfigEx config = KeePass.Program.Config;
-			foreach (AceUrlSchemeOverride url in config.Integration.UrlSchemeOverrides.BuiltInOverrides)
+			var o = KeePass.Program.Config.Integration.UrlSchemeOverrides;
+			foreach (var l in new List<List<AceUrlSchemeOverride>> { o.BuiltInOverrides, o.CustomOverrides })
 			{
-				if (url.Enabled) RegisterProtocol(url.Scheme);
-			}
-			foreach (AceUrlSchemeOverride url in config.Integration.UrlSchemeOverrides.CustomOverrides)
-			{
-				if (url.Enabled) RegisterProtocol(url.Scheme);
+				foreach (var u in l)
+				{
+					if (u.Enabled)
+					{
+						RegisterProtocol(u.Scheme);
+					}
+				}
 			}
 		}
 
@@ -214,7 +357,7 @@ namespace KPUrl
 			foreach (string protocol in m_created)
 			{
 				try { classes.DeleteSubKeyTree(protocol); }
-				catch(Exception e)
+				catch (Exception e)
 				{
 					MessageBox.Show(e.Message, MyName + ", DeleteSubKeyTree(" + protocol + ")",
 						MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -224,10 +367,10 @@ namespace KPUrl
 
 			foreach (string protocol in m_renamed)
 			{
-				try { ru.RenameSubKey(classes, MyName+"-"+protocol, protocol); }
+				try { ru.RenameSubKey(classes, MyName + "-" + protocol, protocol); }
 				catch (Exception e)
 				{
-					MessageBox.Show(e.Message, MyName + ", RenameSubKey( "+ MyName+"-"+protocol + ", " + protocol + ")",
+					MessageBox.Show(e.Message, MyName + ", RenameSubKey( " + MyName + "-" + protocol + ", " + protocol + ")",
 						MessageBoxButtons.OK, MessageBoxIcon.Error);
 				}
 
@@ -237,27 +380,27 @@ namespace KPUrl
 			classes.Close();
 		}
 
-		private string MatchEntry( PwDatabase pd, PwEntry pe, string scheme, string matchTitle, out int distance)
+		private string MatchEntry(PwDatabase pd, PwEntry pe, string scheme, string matchTitle, out int distance)
 		{
-			string peTitleRaw = pe.Strings.ReadSafeEx(PwDefs.TitleField);
+			string peTitleRaw = pe.Strings.ReadSafe(PwDefs.TitleField);
 			string peTitleStr = SprEngine.Compile(peTitleRaw, new SprContext(pe, pd, SprCompileFlags.All, false, false));
 
 			if (peTitleStr.IndexOf(matchTitle, StringComparison.OrdinalIgnoreCase) >= 0)
 			{
 				distance = 0;
-				if ( ! String.Equals(peTitleStr, matchTitle, StringComparison.OrdinalIgnoreCase))
+				if (!String.Equals(peTitleStr, matchTitle, StringComparison.OrdinalIgnoreCase))
 				{
 					distance++;
 				}
-				if (pe.Strings.ReadSafeEx(scheme) != "")
+				if (pe.Strings.ReadSafe(scheme) != "")
 				{
 					return scheme;
 				}
-				if (pe.Strings.ReadSafeEx(PwDefs.UrlField+"-"+scheme) != "")
+				if (pe.Strings.ReadSafe(PwDefs.UrlField + "-" + scheme) != "")
 				{
-					return PwDefs.UrlField+"-"+scheme;
+					return PwDefs.UrlField + "-" + scheme;
 				}
-				string URL = pe.Strings.ReadSafeEx(PwDefs.UrlField);
+				string URL = pe.Strings.ReadSafe(PwDefs.UrlField);
 				if (URL != "")
 				{
 					string peScheme = URL.Substring(0, URL.IndexOf(":"));
@@ -278,63 +421,65 @@ namespace KPUrl
 
 		private bool FindHostEntry(string scheme, string hostName, out PwEntry entryFound, out string fieldNameFound)
 		{
-			PwDatabase lastPwDatabase = null;
-			PwEntry lastPwEntry = null;
-			string fieldName = null;
-			int lastDistance = int.MaxValue;
-
-			PwGroup pg = new PwGroup(true, true, "search for '"+scheme+":"+hostName+"'", PwIcon.EMailSearch);
-			pg.IsVirtual = true;
-
-			EntryHandler eh = delegate(PwEntry pe)
+			if (!String.IsNullOrEmpty(hostName))
 			{
-				int distance;
-				string fn = MatchEntry(lastPwDatabase, pe, scheme, hostName, out distance);
-				if (fn != null)
-				{
-					pg.AddEntry(pe, false);
-					if (distance < lastDistance)
-					{
-						lastPwEntry = pe;
-						fieldName = fn;
-						lastDistance = distance;
-					}
-					return distance != 0;
-				}
-				distance = int.MaxValue;
-				return true;
-			};
+				PwDatabase lastPwDatabase = null;
+				PwEntry lastPwEntry = null;
+				string fieldName = null;
+				int lastDistance = int.MaxValue;
 
-			List<PwDocument> docs = m_host.MainWindow.DocumentManager.Documents;
-			foreach (PwDocument d in docs)
-			{
-				lastPwDatabase = d.Database;
-				d.Database.RootGroup.TraverseTree(TraversalMethod.PreOrder, null, eh);
-				if (lastPwEntry != null && fieldName != null && lastDistance == 0)
-				{
-					entryFound = lastPwEntry;
-					fieldNameFound = fieldName;
-					return true;
-				}
-			}
+				PwGroup pg = new PwGroup(true, true, "search for '" + scheme + ":" + hostName + "'", PwIcon.EMailSearch);
+				pg.IsVirtual = true;
 
-			uint uNumGroups;
-			uint uNumEntries;
-			pg.GetCounts(true, out uNumGroups, out uNumEntries);
-			if (uNumEntries > 0)
-			{
-				if (uNumEntries == 1)
+				EntryHandler eh = delegate(PwEntry pe)
 				{
 					int distance;
-					lastPwEntry = pg.Entries.GetAt(0);
-					entryFound = lastPwEntry;
-					DocumentManagerEx dm = KeePass.Program.MainForm.DocumentManager;
-					fieldNameFound = MatchEntry(dm.FindContainerOf(lastPwEntry), lastPwEntry, scheme, hostName, out distance);
+					string fn = MatchEntry(lastPwDatabase, pe, scheme, hostName, out distance);
+					if (fn != null)
+					{
+						pg.AddEntry(pe, false);
+						if (distance < lastDistance)
+						{
+							lastPwEntry = pe;
+							fieldName = fn;
+							lastDistance = distance;
+						}
+						return distance != 0;
+					}
+					distance = int.MaxValue;
 					return true;
+				};
+
+				List<PwDocument> docs = m_host.MainWindow.DocumentManager.Documents;
+				foreach (PwDocument d in docs)
+				{
+					lastPwDatabase = d.Database;
+					d.Database.RootGroup.TraverseTree(TraversalMethod.PreOrder, null, eh);
+					if (lastPwEntry != null && fieldName != null && lastDistance == 0)
+					{
+						entryFound = lastPwEntry;
+						fieldNameFound = fieldName;
+						return true;
+					}
 				}
-				KeePass.Program.MainForm.UpdateUI(false, null, false, null, true, pg, false);
-				KeePass.Program.MainForm.RefreshEntriesList();
-				KeePass.Program.MainForm.EnsureVisibleForegroundWindow(true, true);
+
+				uint uNumGroups;
+				uint uNumEntries;
+				pg.GetCounts(true, out uNumGroups, out uNumEntries);
+				if (uNumEntries > 0)
+				{
+					if (uNumEntries == 1)
+					{
+						int distance;
+						entryFound = pg.Entries.GetAt(0);
+						fieldNameFound = MatchEntry(KeePass.Program.MainForm.DocumentManager.FindContainerOf(entryFound),
+							entryFound, scheme, hostName, out distance);
+						return true;
+					}
+					KeePass.Program.MainForm.UpdateUI(false, null, false, null, true, pg, false);
+					KeePass.Program.MainForm.RefreshEntriesList();
+					KeePass.Program.MainForm.EnsureVisibleForegroundWindow(true, true);
+				}
 			}
 			entryFound = null;
 			fieldNameFound = null;

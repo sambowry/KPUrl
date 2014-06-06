@@ -46,6 +46,26 @@ namespace KPUrl
 	{
 		const string MyName = "KPUrl";
 
+		private class TraceBox : Form
+		{
+			public static void Show(string str, string title = "")
+			{
+				Form box = new TraceBox();
+				box.Text = MyName + " trace: " + title;
+				TextBox t = new TextBox();
+				t.Font = KeePass.UI.FontUtil.MonoFont;
+				t.Text = str;
+				t.Dock = DockStyle.Fill;
+				t.Multiline = true;
+				t.ScrollBars = ScrollBars.Both;
+				t.WordWrap = false;
+				t.ReadOnly = true;
+				t.SelectionStart = 0;
+				box.Controls.Add(t);
+				box.ShowDialog();
+			}
+		}
+
 		private IPluginHost m_host = null;
 		private bool m_debug = false;
 
@@ -67,64 +87,28 @@ namespace KPUrl
 			return true;
 		}
 
+		private static Regex expr = new Regex(@"{([^{}]+)}", RegexOptions.Compiled | RegexOptions.Singleline);
+
 		private void OnFilterCompilePre(object sender, SprEventArgs a)
 		{
-			SprContext ctx = a.Context;
-			SprCompileFlags saved_flags = ctx.Flags;
-			if ((saved_flags & SprCompileFlags.ExtNonActive) != SprCompileFlags.None)
+			if ((a.Context.Flags & SprCompileFlags.ExtNonActive) != SprCompileFlags.None)
 			{
-
-				string url = a.Text;
-				if (url.StartsWith("{!C:" + MyName + "}"))
+				SprCompileFlags saved_flags = a.Context.Flags;
+				a.Context.Flags &= ~(SprCompileFlags.ExtActive | SprCompileFlags.ExtNonActive);
+				string t1 = a.Text, t2;
+				int count = 0;
+				do
 				{
-					string scheme = url.Substring(0, url.IndexOf(":"));
-					string hostname = UrlUtil.GetHost(url);
-					PwEntry pe;
-					string fn, compiled = null;
-					if (FindHostEntry(scheme, hostname, out pe, out fn))
-					{
-						ctx.Flags &= ~SprCompileFlags.ExtActive;
-						ctx.Flags &= ~SprCompileFlags.ExtNonActive;
-						GetOverrideForUrl(pe.Strings.ReadSafe(fn), pe, out compiled);
-						ctx.Flags = saved_flags;
-					}
-					if (!String.IsNullOrEmpty(compiled))
-					{
-						a.Text = compiled;
-					}
-					else
-						MessageBox.Show("No suitable URL entry found for '" + a.Text + "'",
-							MyName + ", OnEventMsgReceived()", MessageBoxButtons.OK, MessageBoxIcon.Error);
-				}
-			}
-		}
+					t1 = expr.Replace(t2 = t1,
+						delegate(Match m)
+						{
+							string replaced = SprEngine.Compile(m.Value, a.Context);
 
-		private void OnIpcEvent_old(object sender, IpcEventArgs a)
-		{
-			if (m_debug && ShowIpcEventArgs(a) != DialogResult.OK) return;
-
-			if (String.Equals(a.Name, MyName, StringComparison.OrdinalIgnoreCase))
-			{
-				string URL = a.Args.FileName;
-				string scheme = URL.Substring(0, URL.IndexOf(":"));
-				string hostname = UrlUtil.GetHost(URL);
-
-				if (hostname != "")
-				{
-					PwEntry entry;
-					string fieldName;
-					if (FindHostEntry(scheme, hostname, out entry, out fieldName))
-					{
-						PwEntry tmp = entry.CloneDeep();
-						tmp.Strings.Set(PwDefs.UrlField, entry.Strings.GetSafe(fieldName));
-						KeePass.Util.WinUtil.OpenEntryUrl(tmp);
-					}
-					else
-					{
-						MessageBox.Show("No suitable URL entry found for '" + a.Args.FileName + "'",
-						MyName + ", OnEventMsgReceived()", MessageBoxButtons.OK, MessageBoxIcon.Error);
-					}
-				}
+							return replaced.Equals(m.Value) ? "" : replaced;
+						});
+				} while (++count < 20 && !t1.Equals(t2));
+				a.Context.Flags = saved_flags;
+				a.Text = t1;
 			}
 		}
 
@@ -135,15 +119,27 @@ namespace KPUrl
 			string url = a.Args.FileName;
 			string scheme = url.Substring(0, url.IndexOf(":"));
 			string hostname = UrlUtil.GetHost(url);
+			string userinfo = "";
+			try
+			{
+				Uri uri = new Uri(url);
+				userinfo = uri.UserInfo;
+			}
+			catch { }
 			PwEntry pe;
 			string fn, compiled = null;
-			if (FindHostEntry(scheme, hostname, out pe, out fn))
-				GetOverrideForUrl(pe.Strings.ReadSafe(fn), pe, out compiled);
+			if (!String.IsNullOrEmpty(userinfo) || !FindHostEntry(scheme, hostname, out pe, out fn))
+			{
+				pe = new PwEntry(false, false);
+				pe.Strings.Set(fn = PwDefs.UrlField, new KeePassLib.Security.ProtectedString(false, url));
+			}
+			GetOverrideForUrl(pe.Strings.ReadSafe(fn), pe, out compiled);
 			if (!String.IsNullOrEmpty(compiled))
 				KeePass.Util.WinUtil.OpenUrl(compiled, pe, false);
 			else
 				MessageBox.Show("No suitable URL entry found for '" + a.Args.FileName + "'",
 					MyName + ", OnEventMsgReceived()", MessageBoxButtons.OK, MessageBoxIcon.Error);
+
 		}
 
 		string GetOverrideForUrl(string url, PwEntry pe, out string compiled)
@@ -182,7 +178,7 @@ namespace KPUrl
 							foreach (string s in seg)
 							{
 								text += "seg: " + s + "\r\n";
-								string res1=s, res2;
+								string res1 = s, res2;
 								do
 								{
 									res2 = res1;
@@ -205,25 +201,8 @@ namespace KPUrl
 						}
 			}
 		ret:
-			Form d = new TraceBox(text);
-			d.ShowDialog();
+			if (m_debug) TraceBox.Show(text);
 			return ovr;
-		}
-
-		private class TraceBox : Form
-		{
-			public TraceBox(string str)
-			{
-				Text = "trace";
-				TextBox t = new TextBox();
-				t.Text = str;
-				t.Dock = DockStyle.Fill;
-				t.Multiline = true;
-				t.ScrollBars = ScrollBars.Both;
-				t.WordWrap = false;
-				t.SelectionStart = 0;
-				Controls.Add(t);
-			}
 		}
 
 		private void WindowAddedHandler(object aSender, GwmWindowEventArgs aEventArgs)
@@ -326,6 +305,8 @@ namespace KPUrl
 
 				key.CreateSubKey(@"command").SetValue("",
 					exe + " -" + AppDefs.CommandLineOptions.IpcEvent + ":" + MyName + " \"%1\"");
+
+				MyUriParser.Register(protocol);
 			}
 			catch (Exception e)
 			{
@@ -338,7 +319,7 @@ namespace KPUrl
 		private void RegisterAll()
 		{
 			var o = KeePass.Program.Config.Integration.UrlSchemeOverrides;
-			foreach (var l in new List<List<AceUrlSchemeOverride>> { o.BuiltInOverrides, o.CustomOverrides })
+			foreach (var l in new List<List<AceUrlSchemeOverride>> { /* o.BuiltInOverrides, */ o.CustomOverrides })
 			{
 				foreach (var u in l)
 				{

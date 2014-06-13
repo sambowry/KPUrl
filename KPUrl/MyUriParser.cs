@@ -57,26 +57,6 @@ namespace KPUrl
 					break;
 				default:
 					s = base.GetComponents(uri, components, format);
-					/*
-					string c = "";
-					if (UriComponents.AbsoluteUri == (components & UriComponents.AbsoluteUri)) c += "AbsoluteUri\r\n";
-					if (UriComponents.Fragment == (components & UriComponents.Fragment)) c += "Fragment\r\n";
-					if (UriComponents.Host == (components & UriComponents.Host)) c += "Host\r\n";
-					if (UriComponents.HostAndPort == (components & UriComponents.HostAndPort)) c += "HostAndPort\r\n";
-					if (UriComponents.HttpRequestUrl == (components & UriComponents.HttpRequestUrl)) c += "HttpRequestUrl\r\n";
-					if (UriComponents.KeepDelimiter == (components & UriComponents.KeepDelimiter)) c += "KeepDelimiter\r\n";
-					if (UriComponents.Path == (components & UriComponents.Path)) c += "Path\r\n";
-					if (UriComponents.PathAndQuery == (components & UriComponents.PathAndQuery)) c += "PathAndQuery\r\n";
-					if (UriComponents.Port == (components & UriComponents.Port)) c += "Port\r\n";
-					if (UriComponents.Query == (components & UriComponents.Query)) c += "Query\r\n";
-					if (UriComponents.Scheme == (components & UriComponents.Scheme)) c += "Scheme\r\n";
-					if (UriComponents.SchemeAndServer == (components & UriComponents.SchemeAndServer)) c += "SchemeAndServer\r\n";
-					if (UriComponents.SerializationInfoString == (components & UriComponents.SerializationInfoString)) c += "SerializationInfoString\r\n";
-					if (UriComponents.StrongAuthority == (components & UriComponents.StrongAuthority)) c += "StrongAuthority\r\n";
-					if (UriComponents.StrongPort == (components & UriComponents.StrongPort)) c += "StrongPort\r\n";
-					if (UriComponents.UserInfo == (components & UriComponents.UserInfo)) c += "UserInfo\r\n";
-					MessageBox.Show(c + "\r\ns: " + s, "GetComponents()");
-					*/
 					break;
 			}
 			return s;
@@ -84,3 +64,58 @@ namespace KPUrl
 
 	}
 }
+
+/*
+
+http://jmrware.com/articles/2009/uri_regexp/URI_regex.html
+
+URI		scheme ":" hier-part [ "?" query ] [ "#" fragment ]
+
+[A-Za-z][A-Za-z0-9+\-.]* :                                      # scheme ":"
+(?:                                                             # hier-part
+      //
+  (?:                                                             # authority
+    (?: (?:[A-Za-z0-9\-._~!$&'()*+,;=:]|%[0-9A-Fa-f]{2})* @)?     # [ userinfo "@" ]
+    (?:                                                           # host
+      \[                                                          # IP-literal
+      (?:
+        (?:                                                       # IPv6address
+          (?:                                                    (?:[0-9A-Fa-f]{1,4}:){6}
+          |                                                   :: (?:[0-9A-Fa-f]{1,4}:){5}
+          | (?:                            [0-9A-Fa-f]{1,4})? :: (?:[0-9A-Fa-f]{1,4}:){4}
+          | (?: (?:[0-9A-Fa-f]{1,4}:){0,1} [0-9A-Fa-f]{1,4})? :: (?:[0-9A-Fa-f]{1,4}:){3}
+          | (?: (?:[0-9A-Fa-f]{1,4}:){0,2} [0-9A-Fa-f]{1,4})? :: (?:[0-9A-Fa-f]{1,4}:){2}
+          | (?: (?:[0-9A-Fa-f]{1,4}:){0,3} [0-9A-Fa-f]{1,4})? ::    [0-9A-Fa-f]{1,4}:
+          | (?: (?:[0-9A-Fa-f]{1,4}:){0,4} [0-9A-Fa-f]{1,4})? ::
+          ) (?:
+              [0-9A-Fa-f]{1,4} : [0-9A-Fa-f]{1,4}
+            | (?: (?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?) \.){3}
+                  (?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)
+            )
+        |   (?: (?:[0-9A-Fa-f]{1,4}:){0,5} [0-9A-Fa-f]{1,4})? ::    [0-9A-Fa-f]{1,4}
+        |   (?: (?:[0-9A-Fa-f]{1,4}:){0,6} [0-9A-Fa-f]{1,4})? ::
+        )
+      | [Vv][0-9A-Fa-f]+\.[A-Za-z0-9\-._~!$&'()*+,;=:]+           # / IPvFuture
+      )
+      \]
+    | (?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}           # / IPv4address
+         (?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)
+    | (?:[A-Za-z0-9\-._~!$&'()*+,;=]|%[0-9A-Fa-f]{2})*            # / reg-name
+    )
+    (?: : [0-9]* )?                                               # [ ":" port ]
+  )
+    (?:/ (?:[A-Za-z0-9\-._~!$&'()*+,;=:@]|%[0-9A-Fa-f]{2})* )*  #   path-abempty
+| /                                                             # / path-absolute
+  (?:    (?:[A-Za-z0-9\-._~!$&'()*+,;=:@]|%[0-9A-Fa-f]{2})+
+    (?:/ (?:[A-Za-z0-9\-._~!$&'()*+,;=:@]|%[0-9A-Fa-f]{2})* )*
+  )?
+|        (?:[A-Za-z0-9\-._~!$&'()*+,;=@] |%[0-9A-Fa-f]{2})+     # / path-noscheme
+    (?:/ (?:[A-Za-z0-9\-._~!$&'()*+,;=:@]|%[0-9A-Fa-f]{2})* )*
+|        (?:[A-Za-z0-9\-._~!$&'()*+,;=:@]|%[0-9A-Fa-f]{2})+     # / path-rootless
+    (?:/ (?:[A-Za-z0-9\-._~!$&'()*+,;=:@]|%[0-9A-Fa-f]{2})* )*
+|                                                               # / path-empty
+)
+(?:\? (?:[A-Za-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9A-Fa-f]{2})* )?   # [ "?" query ]
+(?:\# (?:[A-Za-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9A-Fa-f]{2})* )?   # [ "#" fragment ]
+
+*/

@@ -81,13 +81,62 @@ namespace KPUrl
 
 			GlobalWindowManager.WindowAdded += WindowAddedHandler;
 			IpcUtilEx.IpcEvent += OnIpcEvent;
-			SprEngine.FilterCompilePre += OnFilterCompilePre;
+			//SprEngine.FilterCompilePre += OnFilterCompilePre;
 
 			RegisterAll();
+			Application.ApplicationExit += new EventHandler(this.OnApplicationExit);
+			System.Diagnostics.Process.GetCurrentProcess().Exited += new EventHandler(this.OnApplicationExit);
 			return true;
 		}
+/*
+		public string Compile(string strText, SprContext ctx, out int countEmpty)
+		{
+			MessageBox.Show(strText, "Compile() start");
+			int top_left = -1;
+			countEmpty = 0;
+			while (0 <= (top_left = strText.IndexOf("{", top_left + 1)))
+			{
+				int bottom_left, bottom_right;
+				string plh, replaced;
+				do
+				{
+					bottom_right = strText.IndexOf("}", top_left);
+					bottom_left = strText.LastIndexOf("{", bottom_right);
+					plh = strText.Substring(bottom_left, bottom_right - bottom_left + 1);
+					replaced = SprEngine.Compile(plh, ctx);
+					strText = strText.Substring(0, bottom_left) + replaced + strText.Substring(bottom_right + 1);
+					MessageBox.Show(strText, "Compile() inner loop");
+				} while (top_left != bottom_left);
+				if (String.IsNullOrEmpty(replaced)) countEmpty++;
+			}
+			return strText;
+		}
+*/
+/*
+		private static Regex top_plh = new Regex(
+			"({(?>[^{}]+|(?'paren'{)|(?'-paren'}))*(?(paren)(?!))})",
+			RegexOptions.Compiled | RegexOptions.Singleline);
 
-		private static Regex expr = new Regex(@"{([^{}]+)}", RegexOptions.Compiled | RegexOptions.Singleline);
+		public string Compile(string strText, SprContext ctx, out int countEmpty)
+		{
+			int _countEmpty = 0;
+			string compiled = top_plh.Replace(strText,
+				delegate(Match m)
+				{
+					string sm = m.ToString();
+					if (sm.StartsWith("{C:", StringComparison.OrdinalIgnoreCase))
+						return "";
+					string replaced = SprEngine.Compile(sm, ctx);
+					if (replaced.Equals(sm)) replaced = "";
+					if (String.IsNullOrEmpty(replaced)) ++_countEmpty;
+					return replaced;
+				});
+			countEmpty = _countEmpty;
+			return compiled;
+		}
+*/
+/*
+		private static Regex plh = new Regex(@"{([^{}]+)}", RegexOptions.Compiled | RegexOptions.Singleline);
 
 		private void OnFilterCompilePre(object sender, SprEventArgs a)
 		{
@@ -99,19 +148,18 @@ namespace KPUrl
 				int count = 0;
 				do
 				{
-					t1 = expr.Replace(t2 = t1,
+					t1 = plh.Replace(t2 = t1,
 						delegate(Match m)
 						{
-							string replaced = SprEngine.Compile(m.Value, a.Context);
-
-							return replaced.Equals(m.Value) ? "" : replaced;
+							string replaced = SprEngine.Compile(m.ToString(), a.Context);
+							return replaced; // replaced.Equals(m.ToString()) ? "" : replaced;
 						});
 				} while (++count < 20 && !t1.Equals(t2));
 				a.Context.Flags = saved_flags;
 				a.Text = t1;
 			}
 		}
-
+*/
 		private void OnIpcEvent(object sender, IpcEventArgs a)
 		{
 			if (m_debug && ShowIpcEventArgs(a) != DialogResult.OK) return;
@@ -125,33 +173,34 @@ namespace KPUrl
 				Uri uri = new Uri(url);
 				userinfo = uri.UserInfo;
 			}
-			catch { }
+			catch (Exception e) { MessageBox.Show("new Uri('" + url + "')\r\n" + e.Message, "OnIpcEvent()"); }
 			PwEntry pe;
 			string fn, compiled = null;
-			if (!String.IsNullOrEmpty(userinfo) || !FindHostEntry(scheme, hostname, out pe, out fn))
+			userinfo = GetAccountInfo(userinfo);
+			if (!FindHostEntry(scheme, hostname, out pe, out fn))
 			{
 				pe = new PwEntry(false, false);
 				pe.Strings.Set(fn = PwDefs.UrlField, new KeePassLib.Security.ProtectedString(false, url));
 			}
-			GetOverrideForUrl(pe.Strings.ReadSafe(fn), pe, out compiled);
+			//GetOverrideForUrl(pe.Strings.ReadSafe(fn), pe, out compiled);
+			compiled = pe.Strings.ReadSafe(fn);
 			if (!String.IsNullOrEmpty(compiled))
-				KeePass.Util.WinUtil.OpenUrl(compiled, pe, false);
+				//KeePass.Util.WinUtil.OpenUrl(compiled, pe, false);
+				KeePass.Util.WinUtil.OpenUrl(compiled, pe, true);
 			else
 				MessageBox.Show("No suitable URL entry found for '" + a.Args.FileName + "'",
 					MyName + ", OnEventMsgReceived()", MessageBoxButtons.OK, MessageBoxIcon.Error);
-
 		}
-
+/*
 		string GetOverrideForUrl(string url, PwEntry pe, out string compiled)
 		{
-			string ovr = null, text = "";
+			string ovr = null;
 			compiled = null;
 			SprContext ctx = new SprContext(pe, KeePass.Program.MainForm.DocumentManager.FindContainerOf(pe),
 										SprCompileFlags.All, false, false);
 			ctx.ForcePlainTextPasswords = true;
 			ctx.BaseIsEncoded = false; // ???
 			ctx.Base = url;
-			text += "Base: " + url + "\r\n";
 			if (pe.OverrideUrl.Length > 0)
 			{
 				ovr = pe.OverrideUrl;
@@ -164,47 +213,20 @@ namespace KPUrl
 			}
 			else
 			{
-				Regex rx = new Regex("({(?>[^{}]+|(?'paren'{)|(?'-paren'}))*(?(paren)(?!))})");
+				int countEmpty;
 				var o = KeePass.Program.Config.Integration.UrlSchemeOverrides;
 				foreach (var l in new List<List<AceUrlSchemeOverride>> { o.BuiltInOverrides, o.CustomOverrides })
 					foreach (var u in l)
 						if (u.Enabled && url.StartsWith(u.Scheme + ":", StrUtil.CaseIgnoreCmp))
 						{
-							text += "AceUrlSchemeOverride: " + u.Scheme + ": " + u.UrlOverride + "\r\n";
-							int countEmpty = 0;
-							compiled = "";
-							bool plh = false;
-							string[] seg = rx.Split(u.UrlOverride);
-							foreach (string s in seg)
-							{
-								text += "seg: " + s + "\r\n";
-								string res1 = s, res2;
-								do
-								{
-									res2 = res1;
-									res1 = SprEngine.Compile(res2, ctx);
-									text += "res: " + res1 + "\r\n";
-								} while (!res1.Equals(res2));
-								if (plh && res1.StartsWith("{"))
-								{
-									text += "empty: " + res1 + "\r\n";
-									res1 = "";
-								}
-								if (plh && String.IsNullOrEmpty(res1) && !s.StartsWith("{C:", StringComparison.OrdinalIgnoreCase)) countEmpty++;
-								compiled += res1;
-								plh = !plh;
-							}
-							text += "compiled: " + compiled + "\r\n";
-							text += "countEmpty: " + countEmpty + "\r\n";
-							text += "\r\n";
+							compiled = Compile(ovr = u.UrlOverride, ctx, out countEmpty);
 							if (countEmpty == 0) goto ret;
 						}
 			}
 		ret:
-			if (m_debug) TraceBox.Show(text);
 			return ovr;
 		}
-
+*/
 		private void WindowAddedHandler(object aSender, GwmWindowEventArgs aEventArgs)
 		{
 			var optionsForm = aEventArgs.Form as OptionsForm;
@@ -263,10 +285,19 @@ namespace KPUrl
 			return res;
 		}
 
+		private void OnApplicationExit(object sender, EventArgs e)
+		{
+			try
+			{
+				DeRegisterAll();
+			}
+			catch { }
+		}
+
 		public override void Terminate()
 		{
 			DeRegisterAll();
-			SprEngine.FilterCompilePre -= OnFilterCompilePre;
+			//SprEngine.FilterCompilePre -= OnFilterCompilePre;
 			GlobalWindowManager.WindowAdded -= WindowAddedHandler;
 			IpcUtilEx.IpcEvent -= OnIpcEvent;
 		}
@@ -465,6 +496,34 @@ namespace KPUrl
 			entryFound = null;
 			fieldNameFound = null;
 			return false;
+		}
+
+		private string GetAccountInfo(string userinfo)
+		{
+			if (userinfo != "" && !userinfo.StartsWith(":"))
+			{
+				string username = userinfo;
+				int colon = userinfo.IndexOf(':');
+				if (0 <= colon)
+				{
+					username = userinfo.Substring(0, colon);
+					string password = userinfo.Substring(colon + 1);
+					if (password != "")
+						return userinfo;
+				}
+				List<PwDocument> docs = m_host.MainWindow.DocumentManager.Documents;
+				EntryHandler eh = delegate(PwEntry pe)
+					{
+						if (username != pe.Strings.ReadSafe(PwDefs.TitleField))
+							return true;
+						userinfo = pe.Strings.ReadSafe(PwDefs.UserNameField) + ':' +
+								   pe.Strings.ReadSafe(PwDefs.PasswordField);
+						return false;
+					};
+				foreach (PwDocument d in docs)
+					if (!d.Database.RootGroup.TraverseTree(TraversalMethod.PreOrder, null, eh)) break;
+			}
+			return userinfo;
 		}
 	}
 }

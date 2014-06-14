@@ -81,85 +81,14 @@ namespace KPUrl
 
 			GlobalWindowManager.WindowAdded += WindowAddedHandler;
 			IpcUtilEx.IpcEvent += OnIpcEvent;
-			//SprEngine.FilterCompilePre += OnFilterCompilePre;
+			SprEngine.FilterCompilePre += OnFilterCompilePre;
 
 			RegisterAll();
 			Application.ApplicationExit += new EventHandler(this.OnApplicationExit);
 			System.Diagnostics.Process.GetCurrentProcess().Exited += new EventHandler(this.OnApplicationExit);
 			return true;
 		}
-/*
-		public string Compile(string strText, SprContext ctx, out int countEmpty)
-		{
-			MessageBox.Show(strText, "Compile() start");
-			int top_left = -1;
-			countEmpty = 0;
-			while (0 <= (top_left = strText.IndexOf("{", top_left + 1)))
-			{
-				int bottom_left, bottom_right;
-				string plh, replaced;
-				do
-				{
-					bottom_right = strText.IndexOf("}", top_left);
-					bottom_left = strText.LastIndexOf("{", bottom_right);
-					plh = strText.Substring(bottom_left, bottom_right - bottom_left + 1);
-					replaced = SprEngine.Compile(plh, ctx);
-					strText = strText.Substring(0, bottom_left) + replaced + strText.Substring(bottom_right + 1);
-					MessageBox.Show(strText, "Compile() inner loop");
-				} while (top_left != bottom_left);
-				if (String.IsNullOrEmpty(replaced)) countEmpty++;
-			}
-			return strText;
-		}
-*/
-/*
-		private static Regex top_plh = new Regex(
-			"({(?>[^{}]+|(?'paren'{)|(?'-paren'}))*(?(paren)(?!))})",
-			RegexOptions.Compiled | RegexOptions.Singleline);
 
-		public string Compile(string strText, SprContext ctx, out int countEmpty)
-		{
-			int _countEmpty = 0;
-			string compiled = top_plh.Replace(strText,
-				delegate(Match m)
-				{
-					string sm = m.ToString();
-					if (sm.StartsWith("{C:", StringComparison.OrdinalIgnoreCase))
-						return "";
-					string replaced = SprEngine.Compile(sm, ctx);
-					if (replaced.Equals(sm)) replaced = "";
-					if (String.IsNullOrEmpty(replaced)) ++_countEmpty;
-					return replaced;
-				});
-			countEmpty = _countEmpty;
-			return compiled;
-		}
-*/
-/*
-		private static Regex plh = new Regex(@"{([^{}]+)}", RegexOptions.Compiled | RegexOptions.Singleline);
-
-		private void OnFilterCompilePre(object sender, SprEventArgs a)
-		{
-			if ((a.Context.Flags & SprCompileFlags.ExtNonActive) != SprCompileFlags.None)
-			{
-				SprCompileFlags saved_flags = a.Context.Flags;
-				a.Context.Flags &= ~(SprCompileFlags.ExtActive | SprCompileFlags.ExtNonActive);
-				string t1 = a.Text, t2;
-				int count = 0;
-				do
-				{
-					t1 = plh.Replace(t2 = t1,
-						delegate(Match m)
-						{
-							string replaced = SprEngine.Compile(m.ToString(), a.Context);
-							return replaced; // replaced.Equals(m.ToString()) ? "" : replaced;
-						});
-				} while (++count < 20 && !t1.Equals(t2));
-				a.Context.Flags = saved_flags;
-				a.Text = t1;
-			}
-		}
-*/
 		private void OnIpcEvent(object sender, IpcEventArgs a)
 		{
 			if (m_debug && ShowIpcEventArgs(a) != DialogResult.OK) return;
@@ -175,71 +104,35 @@ namespace KPUrl
 			}
 			catch (Exception e) { MessageBox.Show("new Uri('" + url + "')\r\n" + e.Message, "OnIpcEvent()"); }
 			PwEntry pe;
-			string fn, compiled = null;
+			string fn, fv = null;
 			userinfo = GetAccountInfo(userinfo);
 			if (!FindHostEntry(scheme, hostname, out pe, out fn))
 			{
 				pe = new PwEntry(false, false);
 				pe.Strings.Set(fn = PwDefs.UrlField, new KeePassLib.Security.ProtectedString(false, url));
 			}
-			//GetOverrideForUrl(pe.Strings.ReadSafe(fn), pe, out compiled);
-			compiled = pe.Strings.ReadSafe(fn);
-			if (!String.IsNullOrEmpty(compiled))
-				//KeePass.Util.WinUtil.OpenUrl(compiled, pe, false);
-				KeePass.Util.WinUtil.OpenUrl(compiled, pe, true);
+			fv = pe.Strings.ReadSafe(fn);
+			if (!String.IsNullOrEmpty(url))
+				KeePass.Util.WinUtil.OpenUrl(fv, pe, true);
 			else
 				MessageBox.Show("No suitable URL entry found for '" + a.Args.FileName + "'",
 					MyName + ", OnEventMsgReceived()", MessageBoxButtons.OK, MessageBoxIcon.Error);
 		}
-/*
-		string GetOverrideForUrl(string url, PwEntry pe, out string compiled)
-		{
-			string ovr = null;
-			compiled = null;
-			SprContext ctx = new SprContext(pe, KeePass.Program.MainForm.DocumentManager.FindContainerOf(pe),
-										SprCompileFlags.All, false, false);
-			ctx.ForcePlainTextPasswords = true;
-			ctx.BaseIsEncoded = false; // ???
-			ctx.Base = url;
-			if (pe.OverrideUrl.Length > 0)
-			{
-				ovr = pe.OverrideUrl;
-				compiled = SprEngine.Compile(ovr, ctx);
-			}
-			else if (KeePass.Program.Config.Integration.UrlOverride.Length > 0)
-			{
-				ovr = KeePass.Program.Config.Integration.UrlOverride;
-				compiled = SprEngine.Compile(ovr, ctx);
-			}
-			else
-			{
-				int countEmpty;
-				var o = KeePass.Program.Config.Integration.UrlSchemeOverrides;
-				foreach (var l in new List<List<AceUrlSchemeOverride>> { o.BuiltInOverrides, o.CustomOverrides })
-					foreach (var u in l)
-						if (u.Enabled && url.StartsWith(u.Scheme + ":", StrUtil.CaseIgnoreCmp))
-						{
-							compiled = Compile(ovr = u.UrlOverride, ctx, out countEmpty);
-							if (countEmpty == 0) goto ret;
-						}
-			}
-		ret:
-			return ovr;
-		}
-*/
+
 		private void WindowAddedHandler(object aSender, GwmWindowEventArgs aEventArgs)
 		{
 			var optionsForm = aEventArgs.Form as OptionsForm;
 			if (optionsForm != null)
 			{
-				optionsForm.FormClosed += delegate(object sender, FormClosedEventArgs args)
-				{
-					if (optionsForm.DialogResult == DialogResult.OK)
+				optionsForm.FormClosed += 
+					delegate(object sender, FormClosedEventArgs args)
 					{
-						DeRegisterAll();
-						RegisterAll();
-					}
-				};
+						if (optionsForm.DialogResult == DialogResult.OK)
+						{
+							DeRegisterAll();
+							RegisterAll();
+						}
+					};
 			}
 		}
 
@@ -297,9 +190,9 @@ namespace KPUrl
 		public override void Terminate()
 		{
 			DeRegisterAll();
-			//SprEngine.FilterCompilePre -= OnFilterCompilePre;
 			GlobalWindowManager.WindowAdded -= WindowAddedHandler;
 			IpcUtilEx.IpcEvent -= OnIpcEvent;
+			SprEngine.FilterCompilePre -= OnFilterCompilePre;
 		}
 
 		private void RegisterProtocol(string protocol)
@@ -525,5 +418,64 @@ namespace KPUrl
 			}
 			return userinfo;
 		}
+
+		private void OnFilterCompilePre(object sender, SprEventArgs a)
+		{
+			if ((a.Context.Flags & SprCompileFlags.ExtNonActive) != SprCompileFlags.None)
+			{
+				SprCompileFlags saved_flags = a.Context.Flags;
+				a.Context.Flags &= ~(SprCompileFlags.ExtActive | SprCompileFlags.ExtNonActive);
+				int countEmpty;
+				a.Text = Compile(a.Text,a.Context,out countEmpty);
+				a.Context.Flags = saved_flags;
+			}
+		}
+
+		public string Compile(string strText, SprContext ctx, out int countEmpty)
+		{
+			const string begin = "<(";
+			const string end = ")>";
+			countEmpty = 0;
+			int top_left = - begin.Length;
+//			while (0 <= (top_left = strText.IndexOf(begin, top_left + begin.Length)))
+			while (0 <= (top_left = strText.IndexOf(begin)))
+			{
+				int bottom_left, bottom_right;
+				string plh, replaced;
+				do
+				{
+					bottom_right = strText.IndexOf(end, top_left+begin.Length)+end.Length-1;
+					bottom_left = strText.LastIndexOf(begin, bottom_right-end.Length);
+					plh = strText.Substring(bottom_left + begin.Length,
+						(bottom_right - end.Length) - (bottom_left + begin.Length) + 1);
+					replaced = Compile_plh(plh, ctx);
+					if (String.IsNullOrEmpty(replaced)) countEmpty++;
+					strText = strText.Substring(0, bottom_left) + replaced + strText.Substring(bottom_right + 1);
+				} while (top_left != bottom_left);
+			}
+			return strText;
+		}
+
+		public string Compile_plh(string strText, SprContext ctx)
+		{
+			int top_left = -1;
+//			while (0 <= (top_left = strText.IndexOf("{", top_left + 1)))
+			while (0 <= (top_left = strText.IndexOf("{")))
+			{
+				int bottom_left, bottom_right;
+				string plh, replaced;
+				do
+				{
+					bottom_right = strText.IndexOf("}", top_left + 1);
+					bottom_left = strText.LastIndexOf("{", bottom_right - 1);
+					plh = strText.Substring(bottom_left, bottom_right - bottom_left + 1);
+					replaced = SprEngine.Compile(plh, ctx);
+					if( plh == replaced ) replaced = "";
+					strText = strText.Substring(0, bottom_left) + replaced + strText.Substring(bottom_right + 1);
+				} while (top_left != bottom_left);
+			}
+			return strText;
+		}
+
 	}
 }

@@ -21,21 +21,36 @@ namespace KPUrl
 		}
 
 		private static Regex rx = new Regex(
-@"^(?<Scheme>[^:]+)://((?<User>[^@]+)@)?(?<Host>[^@:/?#]+)(:(?<Port>\d+))?(/(?<Path>([^/][^?#]*)?))?(\?(?<Query>[^#]*))?(#(?<Fragment>.*))?$",
+				@"^(?<Scheme>[^:]+):"+
+				@"(?://((?<User>[^@]+)@)?(?<Host>[^@:/?#]+)(:(?<Port>\d+))?)?" +
+				@"(?<Path>([^?#]*)?)?(\?(?<Query>[^#]*))?(#(?<Fragment>.*))?$",
 			RegexOptions.Compiled | RegexOptions.ExplicitCapture | RegexOptions.Singleline);
-		private Match m;
+		private Match m = null;
 
 		protected override void InitializeAndValidate(Uri uri, out UriFormatException parsingError)
 		{
+			//MessageBox.Show("OriginalString: '" + uri.OriginalString + "'", "InitializeAndValidate()");
+
 			m = rx.Match(uri.OriginalString);
-			if (!m.Success)
-				parsingError = new UriFormatException();
+			if (m.Success)
+			{
+				//base.InitializeAndValidate(uri, out parsingError);
+				parsingError = null;
+			}
 			else
-				base.InitializeAndValidate(uri, out parsingError);
+			{
+				MessageBox.Show("bad format: '" + uri.OriginalString + "'", "InitializeAndValidate()");
+				parsingError = new UriFormatException("source: KPUrl.MyUriParser.InitializeAndValidate()");
+			}
 		}
 
 		protected override string GetComponents(Uri uri, UriComponents components, UriFormat format)
 		{
+			if (uri.OriginalString.StartsWith("ssh:"))
+			{
+				MessageBox.Show("OriginalString: '" + uri.OriginalString + "'", "GetComponents()");
+			}
+
 			string s;
 			switch (components)
 			{

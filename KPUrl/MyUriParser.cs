@@ -29,12 +29,10 @@ namespace KPUrl
 
 		protected override void InitializeAndValidate(Uri uri, out UriFormatException parsingError)
 		{
-			//MessageBox.Show("OriginalString: '" + uri.OriginalString + "'", "InitializeAndValidate()");
-
 			m = rx.Match(uri.OriginalString);
 			if (m.Success)
 			{
-				//base.InitializeAndValidate(uri, out parsingError);
+				base.InitializeAndValidate(uri, out parsingError);
 				parsingError = null;
 			}
 			else
@@ -46,11 +44,6 @@ namespace KPUrl
 
 		protected override string GetComponents(Uri uri, UriComponents components, UriFormat format)
 		{
-			if (uri.OriginalString.StartsWith("ssh:"))
-			{
-				MessageBox.Show("OriginalString: '" + uri.OriginalString + "'", "GetComponents()");
-			}
-
 			string s;
 			switch (components)
 			{

@@ -20,21 +20,25 @@
 //  along with this program; if not, see <http://www.gnu.org/licenses>
 //
 
+#define TRACE
+
 using System;
+using System.Diagnostics;
 using System.Windows.Forms;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
+using KeePass.Plugins;
 using KeePass.App;
 using KeePass.App.Configuration;
 using KeePass.UI;
+using KeePass.Forms;
 using KeePass.Util;
 using KeePass.Util.Spr;
-using KeePass.Forms;
-using KeePass.Plugins;
 using KeePassLib;
 using KeePassLib.Utility;
+using KeePassLib.Security;
 using KeePassLib.Delegates;
 using KeePassLib.Collections;
 
@@ -78,6 +82,7 @@ namespace KPUrl
 			if (host == null) return false;
 			m_host = host;
 			m_debug = (m_host.CommandLineArgs[AppDefs.CommandLineOptions.Debug] != null);
+			Trace.TraceInformation(MyName + " Initialize()");
 
 			GlobalWindowManager.WindowAdded += WindowAddedHandler;
 			IpcUtilEx.IpcEvent += OnIpcEvent;
@@ -124,7 +129,7 @@ namespace KPUrl
 			var optionsForm = aEventArgs.Form as OptionsForm;
 			if (optionsForm != null)
 			{
-				optionsForm.FormClosed += 
+				optionsForm.FormClosed +=
 					delegate(object sender, FormClosedEventArgs args)
 					{
 						if (optionsForm.DialogResult == DialogResult.OK)
@@ -193,6 +198,7 @@ namespace KPUrl
 			GlobalWindowManager.WindowAdded -= WindowAddedHandler;
 			IpcUtilEx.IpcEvent -= OnIpcEvent;
 			SprEngine.FilterCompilePre -= OnFilterCompilePre;
+			Trace.TraceInformation(MyName + " Terminate()");
 		}
 
 		private void RegisterProtocol(string protocol)
@@ -426,26 +432,43 @@ namespace KPUrl
 				SprCompileFlags saved_flags = a.Context.Flags;
 				a.Context.Flags &= ~(SprCompileFlags.ExtActive | SprCompileFlags.ExtNonActive);
 				int countEmpty;
-				a.Text = Compile(a.Text,a.Context,out countEmpty);
+				a.Text = Compile(a.Text, a.Context, out countEmpty);
 				a.Context.Flags = saved_flags;
 			}
 		}
 
 		public string Compile(string strText, SprContext ctx, out int countEmpty)
 		{
+			countEmpty = 0;
+			bool doReplace = false;
+			string fieldName = null;
+			bool isProtected = false;
+			if (strText.StartsWith("=") && ctx != null && ctx.Entry != null )
+			{
+				foreach (string fn in ctx.Entry.Strings.GetKeys())
+				{
+					if (strText == ctx.Entry.Strings.ReadSafe(fn))
+					{
+						fieldName = fn;
+						isProtected = ctx.Entry.Strings.Get(fn).IsProtected;
+						break;
+					}
+				}
+				doReplace = (fieldName != null);
+				strText = strText.Substring(1);
+			}
 			const string begin = "<(";
 			const string end = ")>";
-			countEmpty = 0;
-			int top_left = - begin.Length;
-//			while (0 <= (top_left = strText.IndexOf(begin, top_left + begin.Length)))
+			int top_left = -begin.Length;
+			//			while (0 <= (top_left = strText.IndexOf(begin, top_left + begin.Length)))
 			while (0 <= (top_left = strText.IndexOf(begin)))
 			{
 				int bottom_left, bottom_right;
 				string plh, replaced;
 				do
 				{
-					bottom_right = strText.IndexOf(end, top_left+begin.Length)+end.Length-1;
-					bottom_left = strText.LastIndexOf(begin, bottom_right-end.Length);
+					bottom_right = strText.IndexOf(end, top_left + begin.Length) + end.Length - 1;
+					bottom_left = strText.LastIndexOf(begin, bottom_right - end.Length);
 					plh = strText.Substring(bottom_left + begin.Length,
 						(bottom_right - end.Length) - (bottom_left + begin.Length) + 1);
 					replaced = Compile_plh(plh, ctx);
@@ -453,13 +476,18 @@ namespace KPUrl
 					strText = strText.Substring(0, bottom_left) + replaced + strText.Substring(bottom_right + 1);
 				} while (top_left != bottom_left);
 			}
+			if (doReplace)
+			{
+				strText = SprEngine.Compile(strText, ctx);
+				ctx.Entry.Strings.Set(fieldName, new ProtectedString(isProtected, strText));
+			}
 			return strText;
 		}
 
 		public string Compile_plh(string strText, SprContext ctx)
 		{
 			int top_left = -1;
-//			while (0 <= (top_left = strText.IndexOf("{", top_left + 1)))
+			//			while (0 <= (top_left = strText.IndexOf("{", top_left + 1)))
 			while (0 <= (top_left = strText.IndexOf("{")))
 			{
 				int bottom_left, bottom_right;
@@ -470,7 +498,7 @@ namespace KPUrl
 					bottom_left = strText.LastIndexOf("{", bottom_right - 1);
 					plh = strText.Substring(bottom_left, bottom_right - bottom_left + 1);
 					replaced = SprEngine.Compile(plh, ctx);
-					if( plh == replaced ) replaced = "";
+					if (plh == replaced) replaced = "";
 					strText = strText.Substring(0, bottom_left) + replaced + strText.Substring(bottom_right + 1);
 				} while (top_left != bottom_left);
 			}

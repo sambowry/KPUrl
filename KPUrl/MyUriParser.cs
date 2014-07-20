@@ -22,7 +22,7 @@ namespace KPUrl
 
 		private static Regex rx = new Regex(
 				@"^(?<Scheme>[^:]+):"+
-				@"(?://((?<User>[^@]+)@)?(?<Host>[^@:/?#]+)(:(?<Port>\d+))?)?" +
+				@"(?://((?<User>[^@/]+)@)?(?<Host>[^@:/?#]+)(:(?<Port>\d+))?)?" +
 				@"(?<Path>([^?#]*)?)?(\?(?<Query>[^#]*))?(#(?<Fragment>.*))?$",
 			RegexOptions.Compiled | RegexOptions.ExplicitCapture | RegexOptions.Singleline);
 		private Match m = null;

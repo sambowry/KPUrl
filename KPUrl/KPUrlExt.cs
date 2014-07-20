@@ -87,6 +87,7 @@ namespace KPUrl
 			GlobalWindowManager.WindowAdded += WindowAddedHandler;
 			IpcUtilEx.IpcEvent += OnIpcEvent;
 			SprEngine.FilterCompilePre += OnFilterCompilePre;
+			SprEngine.FilterCompile += OnFilterCompile;
 
 			RegisterAll();
 			Application.ApplicationExit += new EventHandler(this.OnApplicationExit);
@@ -97,9 +98,21 @@ namespace KPUrl
 		private void OnIpcEvent(object sender, IpcEventArgs a)
 		{
 			if (m_debug && ShowIpcEventArgs(a) != DialogResult.OK) return;
+			Trace.TraceInformation(MyName + " IpcEventArgs.name = '" + a.Name + "'");
 			if (!String.Equals(a.Name, MyName, StringComparison.OrdinalIgnoreCase)) return;
 			string url = a.Args.FileName;
+			Trace.TraceInformation(MyName + " IpcEventArgs.Args.FileName = '" + url + "'");
 			string scheme = url.Substring(0, url.IndexOf(":"));
+			bool has_authority = url.StartsWith(scheme + "://");
+
+			if (scheme.Equals("kp", StringComparison.OrdinalIgnoreCase))
+			{
+				scheme = "URL";
+				url = scheme + url.Substring(url.IndexOf(":"));
+			}
+			Trace.TraceInformation(MyName + " scheme = '" + scheme + "'");
+			Trace.TraceInformation(MyName + " url = '" + url + "'");
+
 			string hostname = UrlUtil.GetHost(url);
 			string userinfo = "";
 			try
@@ -108,6 +121,7 @@ namespace KPUrl
 				userinfo = uri.UserInfo;
 			}
 			catch (Exception e) { MessageBox.Show("new Uri('" + url + "')\r\n" + e.Message, "OnIpcEvent()"); }
+
 			PwEntry pe;
 			string fn, fv = null;
 			userinfo = GetAccountInfo(userinfo);
@@ -437,13 +451,30 @@ namespace KPUrl
 			}
 		}
 
+		private void OnFilterCompile(object sender, SprEventArgs a)
+		{
+			//if ((a.Context.Flags & SprCompileFlags.ExtNonActive) != SprCompileFlags.None)
+			{
+				int start = -1;
+				while (0 <= (start = a.Text.IndexOf("{PASSWORD:", start + 1, StringComparison.OrdinalIgnoreCase)))
+				{
+					int end = a.Text.IndexOf("}", start);
+					string plh = a.Text.Substring(start, end - start + 1);
+					string pw = !a.Context.ForcePlainTextPasswords ? // && KeePass.Program.Config.MainWindow.IsColumnHidden(AceColumnType.Password) ?
+							PwDefs.HiddenPassword : a.Text.Substring(start + 10, (end - 1) - (start + 10) + 1);
+					a.Text = a.Text.Remove(start, end - start + 1);
+					a.Text = a.Text.Insert(start, pw);
+				}
+			}
+		}
+
 		public string Compile(string strText, SprContext ctx, out int countEmpty)
 		{
 			countEmpty = 0;
 			bool doReplace = false;
 			string fieldName = null;
 			bool isProtected = false;
-			if (strText.StartsWith("=") && ctx != null && ctx.Entry != null )
+			if (strText.StartsWith("=") && ctx != null && ctx.Entry != null)
 			{
 				foreach (string fn in ctx.Entry.Strings.GetKeys())
 				{

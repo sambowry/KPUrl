@@ -89,10 +89,40 @@ namespace KPUrl
 			SprEngine.FilterCompilePre += OnFilterCompilePre;
 			SprEngine.FilterCompile += OnFilterCompile;
 
+			PwEntry.EntryTouched += OnTouched;
+
 			RegisterAll();
 			Application.ApplicationExit += new EventHandler(this.OnApplicationExit);
 			System.Diagnostics.Process.GetCurrentProcess().Exited += new EventHandler(this.OnApplicationExit);
 			return true;
+		}
+
+		private void OnTouched(object sender, ObjectTouchedEventArgs a)
+		{
+			if (a.Modified)
+			{
+				PwEntry pe = a.Object as PwEntry;
+				if (pe != null) //&& e.str  a.strText.StartsWith("="))
+				{
+					PwDatabase pd = KeePass.Program.MainForm.DocumentManager.SafeFindContainerOf(pe);
+					foreach (string fkey in pe.Strings.GetKeys())
+					{
+						string fval = pe.Strings.ReadSafe(fkey);
+						if (fval.StartsWith("="))
+						{
+							Trace.TraceInformation("modified: " + pe.Strings.ReadSafe(PwDefs.TitleField));
+							Trace.TraceInformation("    pre:'" + fkey + "' = '" + fval + "'");
+
+							SprContext ctx = new SprContext(pe, pd, SprCompileFlags.All);
+							string strText = SprEngine.Compile(fval.Substring(1), ctx);
+							pe.Strings.Set(fkey, new ProtectedString(pe.Strings.Get(fkey).IsProtected, strText));
+							pe.Touch(true);
+							Trace.TraceInformation("   post:'" + fkey + "' = '" + strText + "'");
+						}
+					}
+					//KeePass.Program.MainForm.Refresh();
+				}
+			}
 		}
 
 		private void OnIpcEvent(object sender, IpcEventArgs a)
@@ -125,14 +155,19 @@ namespace KPUrl
 			PwEntry pe;
 			string fn, fv = null;
 			userinfo = GetAccountInfo(userinfo);
-			if (!FindHostEntry(scheme, hostname, out pe, out fn))
+			Trace.TraceInformation(MyName + " userinfo = '" + userinfo + "'");
+			if (has_authority || !FindHostEntry(scheme, hostname, out pe, out fn))
 			{
 				pe = new PwEntry(false, false);
 				pe.Strings.Set(fn = PwDefs.UrlField, new KeePassLib.Security.ProtectedString(false, url));
+				Trace.TraceInformation(MyName + " new PwEntry('" + url + "')");
 			}
 			fv = pe.Strings.ReadSafe(fn);
 			if (!String.IsNullOrEmpty(url))
+			{
+				Trace.TraceInformation(MyName + " OpenUrl('" + fn + "' = '" + fv + "')");
 				KeePass.Util.WinUtil.OpenUrl(fv, pe, true);
+			}
 			else
 				MessageBox.Show("No suitable URL entry found for '" + a.Args.FileName + "'",
 					MyName + ", OnEventMsgReceived()", MessageBoxButtons.OK, MessageBoxIcon.Error);
@@ -140,6 +175,7 @@ namespace KPUrl
 
 		private void WindowAddedHandler(object aSender, GwmWindowEventArgs aEventArgs)
 		{
+			Trace.TraceInformation("WindowAddedHandler(aEventArgs.Form.Name = '" + aEventArgs.Form.Name + "')");
 			var optionsForm = aEventArgs.Form as OptionsForm;
 			if (optionsForm != null)
 			{
@@ -312,14 +348,25 @@ namespace KPUrl
 
 			if (peTitleStr.IndexOf(matchTitle, StringComparison.OrdinalIgnoreCase) >= 0)
 			{
+				Trace.TraceInformation(MyName + "   MatchEntry found title: '"+peTitleStr+"'" );
 				distance = 0;
 				if (!String.Equals(peTitleStr, matchTitle, StringComparison.OrdinalIgnoreCase))
 				{
 					distance++;
 				}
-				if (pe.Strings.ReadSafe(scheme) != "")
+				string fn = scheme;
+				foreach( string key in pe.Strings.GetKeys() )
 				{
-					return scheme;
+					if( key.Equals(fn,StringComparison.OrdinalIgnoreCase) )
+					{
+						fn = key;
+						break;
+					}
+				}
+				Trace.TraceInformation(MyName + "   ReadSafe('" + fn + "') = '" + pe.Strings.ReadSafe(fn) + "'");
+				if (pe.Strings.ReadSafe(fn) != "")
+				{
+					return fn;
 				}
 				if (pe.Strings.ReadSafe(PwDefs.UrlField + "-" + scheme) != "")
 				{
@@ -353,6 +400,8 @@ namespace KPUrl
 				string fieldName = null;
 				int lastDistance = int.MaxValue;
 
+				Trace.TraceInformation(MyName + "   FindHostEntry(scheme='"+scheme+"', hostName='"+hostName+"')");
+
 				PwGroup pg = new PwGroup(true, true, "search for '" + scheme + ":" + hostName + "'", PwIcon.EMailSearch);
 				pg.IsVirtual = true;
 
@@ -384,6 +433,8 @@ namespace KPUrl
 					{
 						entryFound = lastPwEntry;
 						fieldNameFound = fieldName;
+						Trace.TraceInformation(MyName + "   entryFound = '" + entryFound.Strings.ReadSafe(PwDefs.TitleField) + "'");
+						Trace.TraceInformation(MyName + "   fieldNameFound = '" + fieldName + "'");
 						return true;
 					}
 				}
@@ -465,6 +516,12 @@ namespace KPUrl
 					a.Text = a.Text.Remove(start, end - start + 1);
 					a.Text = a.Text.Insert(start, pw);
 				}
+
+				// {BASE:ACCOUNT} {BASE:ACCOUNT:USERNAME} {BASE:ACCOUNT:PASSWORD}
+				// {BASE:PATH:1}
+				// {BASE:AUTHORITY:0}
+				// {BASE:QUERY:field}  field1=value1&field2=value2&field3=value3...   [&;/]
+
 			}
 		}
 
@@ -474,6 +531,7 @@ namespace KPUrl
 			bool doReplace = false;
 			string fieldName = null;
 			bool isProtected = false;
+			/*
 			if (strText.StartsWith("=") && ctx != null && ctx.Entry != null)
 			{
 				foreach (string fn in ctx.Entry.Strings.GetKeys())
@@ -488,6 +546,7 @@ namespace KPUrl
 				doReplace = (fieldName != null);
 				strText = strText.Substring(1);
 			}
+			*/
 			const string begin = "<(";
 			const string end = ")>";
 			int top_left = -begin.Length;
@@ -511,6 +570,7 @@ namespace KPUrl
 			{
 				strText = SprEngine.Compile(strText, ctx);
 				ctx.Entry.Strings.Set(fieldName, new ProtectedString(isProtected, strText));
+				ctx.Entry.Touch(true);
 			}
 			return strText;
 		}
